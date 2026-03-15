@@ -32,7 +32,7 @@ DEFAULT_CONFIG = {
     "pacifica_wallet":     "",
     "telegram_token":      "8412005103:AAEOuZ5UK7eUn5HRpAePGBP3G65Q92lKZiw",
     "telegram_chat_id":    "6983367737",
-    "symbol":              "BTC-USDC",
+    "symbol":              "BTC",
     "leverage":            5,
     "capital_usdc":        100,
     "grid_count":          20,
@@ -78,17 +78,9 @@ def sign_ed25519(private_key_b58: str, message: str) -> str:
     signed      = signing_key.sign(message.encode("utf-8"))
     return base58.b58encode(signed.signature).decode()
 
-def pac_headers(method, path, body=""):
-    cfg = get_cfg()
-    ts  = str(int(time.time() * 1000))
-    sig = sign_request(cfg["pacifica_api_secret"], ts, method, path, body)
-    return {
-        "Content-Type":     "application/json",
-        "X-API-Key":        cfg["pacifica_api_key"],
-        "X-API-Timestamp":  ts,
-        "X-API-Signature":  sig,
-        "X-Wallet-Address": cfg["pacifica_wallet"],
-    }
+def pac_headers():
+    """Headers básicos para Pacifica — la autenticación va en el body (Ed25519 signature)."""
+    return {"Content-Type": "application/json"}
 
 def get_btc_price():
     try:
@@ -125,7 +117,7 @@ def place_limit_order(side, price, size_usdc):
     body_str   = json.dumps(body_dict, separators=(",", ":"))
     try:
         base = "https://api.pacifica.fi/api/v1"
-        resp = requests.post(f"{base}{path}", headers=pac_headers("POST", path, body_str),
+        resp = requests.post(f"{base}{path}", headers=pac_headers(),
                              data=body_str, timeout=10)
         print(f"[Pacifica] {pac_side} @ ${price} → {resp.status_code}: {resp.text[:200]}")
         resp.raise_for_status()
@@ -136,10 +128,10 @@ def place_limit_order(side, price, size_usdc):
 
 def get_open_orders():
     cfg  = get_cfg()
-    path = f"/orders?symbol={cfg['symbol']}&status=open"
+    path = f"/orders?symbol=BTC&status=open&account={cfg['pacifica_wallet']}"
     try:
         base = "https://api.pacifica.fi/api/v1"
-        resp = requests.get(f"{base}{path}", headers=pac_headers("GET", path), timeout=10)
+        resp = requests.get(f"{base}{path}", headers=pac_headers(), timeout=10)
         resp.raise_for_status()
         return resp.json().get("data", [])
     except:
@@ -147,10 +139,10 @@ def get_open_orders():
 
 def get_order_history():
     cfg  = get_cfg()
-    path = f"/orders/history?symbol={cfg['symbol']}&limit=50"
+    path = f"/orders/history?symbol=BTC&limit=50&account={cfg['pacifica_wallet']}"
     try:
         base = "https://api.pacifica.fi/api/v1"
-        resp = requests.get(f"{base}{path}", headers=pac_headers("GET", path), timeout=10)
+        resp = requests.get(f"{base}{path}", headers=pac_headers(), timeout=10)
         resp.raise_for_status()
         return resp.json().get("data", [])
     except:
