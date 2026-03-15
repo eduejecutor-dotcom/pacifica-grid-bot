@@ -115,7 +115,7 @@ def place_limit_order(side, price, size_usdc):
         "symbol":          "BTC",
         "side":            pac_side,
         "price":           str(int(round(price))),   # entero, sin decimales
-        "amount":          str(btc_amount),
+        "amount":          f"{btc_amount:.5f}",   # siempre decimal: "0.00007" no "7e-05"
         "tif":             "GTC",
         "reduce_only":     False,
         "client_order_id": str(uuid.uuid4()),
