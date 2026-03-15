@@ -75,9 +75,6 @@ def sign_ed25519(private_key_b58: str, message: str) -> str:
     if len(key_bytes) == 64:
         key_bytes = key_bytes[:32]   # formato keypair Solana: 32 priv + 32 pub
     signing_key = nacl.signing.SigningKey(key_bytes)
-    # Log clave pública derivada para verificar que el keypair es correcto
-    derived_pub = base58.b58encode(bytes(signing_key.verify_key)).decode()
-    print(f"[DEBUG] Clave pública derivada: {derived_pub}")
     signed      = signing_key.sign(message.encode("utf-8"))
     return base58.b58encode(signed.signature).decode()
 
