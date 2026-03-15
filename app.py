@@ -91,24 +91,35 @@ def get_btc_price():
         return 0.0
 
 def place_limit_order(side, price, size_usdc):
-    cfg      = get_cfg()
-    path     = "/orders/create"
-    body_dict = {
-        "symbol":            cfg["symbol"],
-        "side":              side.upper(),
-        "order_type":        "limit",
-        "price":             round(price, 1),
-        "size":              round(size_usdc, 2),
-        "size_denomination": "USDC",
-        "leverage":          cfg["leverage"],
-        "reduce_only":       False,
-        "agent_wallet":      cfg["pacifica_api_key"],
+    cfg        = get_cfg()
+    path       = "/orders/create"
+    ts         = str(int(time.time() * 1000))
+    # Convertir USDC a cantidad BTC
+    btc_price  = get_btc_price() or price
+    btc_amount = round(size_usdc / btc_price, 6)
+    # "bid" = comprar, "ask" = vender
+    pac_side   = "bid" if side.upper() in ("LONG", "BUY") else "ask"
+    body_dict  = {
+        "account":         cfg["pacifica_wallet"],
+        "agent_wallet":    cfg["pacifica_api_key"],
+        "timestamp":       int(ts),
+        "symbol":          "BTC",
+        "side":            pac_side,
+        "price":           str(round(price, 1)),
+        "amount":          str(btc_amount),
+        "tif":             "GTC",
+        "reduce_only":     False,
+        "client_order_id": f"grid_{pac_side}_{int(price)}_{ts}",
     }
-    body_str = json.dumps(body_dict, separators=(",", ":"))
+    body_str   = json.dumps(body_dict, separators=(",", ":"))
+    sig        = sign_request(cfg["pacifica_api_secret"], ts, "POST", path, body_str)
+    body_dict["signature"] = sig
+    body_str   = json.dumps(body_dict, separators=(",", ":"))
     try:
         base = "https://api.pacifica.fi/api/v1"
         resp = requests.post(f"{base}{path}", headers=pac_headers("POST", path, body_str),
                              data=body_str, timeout=10)
+        print(f"[Pacifica] {pac_side} @ ${price} → {resp.status_code}: {resp.text[:200]}")
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
