@@ -36,8 +36,8 @@ DEFAULT_CONFIG = {
     "leverage":            5,
     "capital_usdc":        100,
     "grid_count":          20,
-    "grid_lower":          65000.0,
-    "grid_upper":          78000.0,
+    "grid_lower":          50000.0,
+    "grid_upper":          80000.0,
     "check_interval":      15,
 }
 
@@ -75,12 +75,18 @@ def sign_ed25519(private_key_b58: str, message: str) -> str:
     if len(key_bytes) == 64:
         key_bytes = key_bytes[:32]   # formato keypair Solana: 32 priv + 32 pub
     signing_key = nacl.signing.SigningKey(key_bytes)
+    # Log clave pública derivada para verificar que el keypair es correcto
+    derived_pub = base58.b58encode(bytes(signing_key.verify_key)).decode()
+    print(f"[DEBUG] Clave pública derivada: {derived_pub}")
     signed      = signing_key.sign(message.encode("utf-8"))
     return base58.b58encode(signed.signature).decode()
 
-def pac_headers():
-    """Headers básicos para Pacifica — la autenticación va en el body (Ed25519 signature)."""
-    return {"Content-Type": "application/json"}
+def pac_headers(agent_wallet: str = ""):
+    """Headers para Pacifica. agent_wallet va en el header, NO en el body."""
+    h = {"Content-Type": "application/json"}
+    if agent_wallet:
+        h["agent_wallet"] = agent_wallet
+    return h
 
 def get_btc_price():
     try:
@@ -96,32 +102,40 @@ def place_limit_order(side, price, size_usdc):
     ts         = str(int(time.time() * 1000))
     # Convertir USDC a cantidad BTC
     btc_price  = get_btc_price() or price
-    btc_amount = round(size_usdc / btc_price, 6)
+    # BTC: tick_size=1 (precio entero), lot_size=0.00001 (5 decimales)
+    btc_amount = round(size_usdc / btc_price, 5)
+    btc_amount = max(btc_amount, 0.00001)   # mínimo 1 lot
     # "bid" = comprar, "ask" = vender
     pac_side   = "bid" if side.upper() in ("LONG", "BUY") else "ask"
+    # agent_wallet va en el HEADER, NO en el body (según docs de Pacifica)
     body_dict  = {
         "account":         cfg["pacifica_wallet"],
-        "agent_wallet":    cfg["pacifica_api_key"],
         "timestamp":       int(ts),
+        "expiry_window":   5000,
         "symbol":          "BTC",
         "side":            pac_side,
-        "price":           str(round(price, 1)),
+        "price":           str(int(round(price))),   # entero, sin decimales
         "amount":          str(btc_amount),
         "tif":             "GTC",
         "reduce_only":     False,
         "client_order_id": str(uuid.uuid4()),
     }
-    body_str   = json.dumps(body_dict, separators=(",", ":"))
+    # Firmar el body sin agent_wallet (sort_keys para orden determinista)
+    body_str   = json.dumps(body_dict, separators=(",", ":"), sort_keys=True)
     sig        = sign_ed25519(cfg["pacifica_api_secret"], body_str)
     body_dict["signature"] = sig
-    body_str   = json.dumps(body_dict, separators=(",", ":"))
+    body_str   = json.dumps(body_dict, separators=(",", ":"), sort_keys=True)
     try:
         base = "https://api.pacifica.fi/api/v1"
-        resp = requests.post(f"{base}{path}", headers=pac_headers(),
+        resp = requests.post(f"{base}{path}",
+                             headers=pac_headers(cfg["pacifica_api_key"]),
                              data=body_str, timeout=10)
-        print(f"[Pacifica] {pac_side} @ ${price} → {resp.status_code}: {resp.text[:200]}")
+        print(f"[Pacifica] {pac_side} @ ${price:.1f} → {resp.status_code}: {resp.text[:400]}")
         resp.raise_for_status()
         return resp.json()
+    except requests.exceptions.HTTPError as e:
+        print(f"[Pacifica] HTTP {resp.status_code} orden {side} @ ${price}: {resp.text[:400]}")
+        return None
     except Exception as e:
         print(f"[Pacifica] Error orden {side} @ ${price}: {e}")
         return None
