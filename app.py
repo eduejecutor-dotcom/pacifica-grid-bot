@@ -13,6 +13,8 @@ import hmac
 import threading
 import requests
 import pandas as pd
+import base58
+import nacl.signing
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
 from flask import Flask, jsonify, request, render_template_string
@@ -67,9 +69,14 @@ bot_state = {
 def get_cfg():
     return bot_state["config"]
 
-def sign_request(secret, timestamp, method, path, body=""):
-    msg = timestamp + method.upper() + path + body
-    return hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
+def sign_ed25519(private_key_b58: str, message: str) -> str:
+    """Firma un mensaje con Ed25519 usando clave privada base58 de Solana."""
+    key_bytes = base58.b58decode(private_key_b58)
+    if len(key_bytes) == 64:
+        key_bytes = key_bytes[:32]   # formato keypair Solana: 32 priv + 32 pub
+    signing_key = nacl.signing.SigningKey(key_bytes)
+    signed      = signing_key.sign(message.encode("utf-8"))
+    return base58.b58encode(signed.signature).decode()
 
 def pac_headers(method, path, body=""):
     cfg = get_cfg()
@@ -113,7 +120,7 @@ def place_limit_order(side, price, size_usdc):
         "client_order_id": str(uuid.uuid4()),
     }
     body_str   = json.dumps(body_dict, separators=(",", ":"))
-    sig        = sign_request(cfg["pacifica_api_secret"], ts, "POST", path, body_str)
+    sig        = sign_ed25519(cfg["pacifica_api_secret"], body_str)
     body_dict["signature"] = sig
     body_str   = json.dumps(body_dict, separators=(",", ":"))
     try:
