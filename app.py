@@ -121,7 +121,11 @@ def place_limit_order(side, price, size_usdc):
         "reduce_only":     False,
         "client_order_id": str(uuid.uuid4()),
     }
-    message_dict = {**signature_header, **signature_payload}
+    # Estructura exacta del SDK oficial: payload anidado bajo "data"
+    message_dict = {
+        **signature_header,
+        "data": signature_payload,
+    }
     message_str  = json.dumps(message_dict, separators=(",", ":"), sort_keys=True)
     sig          = sign_ed25519(cfg["pacifica_api_secret"], message_str)
 
