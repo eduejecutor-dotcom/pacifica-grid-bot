@@ -92,10 +92,11 @@ def get_btc_price():
 
 def place_limit_order(side, price, size_usdc):
     cfg      = get_cfg()
-    path     = "/orders/create_limit"
+    path     = "/orders/create"
     body_dict = {
         "symbol":            cfg["symbol"],
         "side":              side.upper(),
+        "order_type":        "limit",
         "price":             round(price, 1),
         "size":              round(size_usdc, 2),
         "size_denomination": "USDC",
