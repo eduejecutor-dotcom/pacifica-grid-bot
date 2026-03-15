@@ -7,6 +7,7 @@
 
 import json
 import time
+import uuid
 import hashlib
 import hmac
 import threading
@@ -109,7 +110,7 @@ def place_limit_order(side, price, size_usdc):
         "amount":          str(btc_amount),
         "tif":             "GTC",
         "reduce_only":     False,
-        "client_order_id": f"grid_{pac_side}_{int(price)}_{ts}",
+        "client_order_id": str(uuid.uuid4()),
     }
     body_str   = json.dumps(body_dict, separators=(",", ":"))
     sig        = sign_request(cfg["pacifica_api_secret"], ts, "POST", path, body_str)
