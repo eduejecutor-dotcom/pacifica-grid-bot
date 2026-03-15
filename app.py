@@ -8,6 +8,7 @@
 """
 
 import json
+import math
 import time
 import uuid
 import threading
@@ -93,8 +94,12 @@ def place_limit_order(side, price, size_usdc, reduce_only=False):
     btc_price  = get_btc_price() or price
     leverage   = cfg.get("leverage", 5)
 
-    btc_amount = round((size_usdc * leverage) / btc_price, 5)
-    btc_amount = max(btc_amount, 0.00013)
+    btc_amount = (size_usdc * leverage) / btc_price
+    # Mínimo: Pacifica exige $10 notional calculado sobre el precio de la ORDEN
+    # Usamos 10.5 para tener margen y redondeamos hacia ARRIBA a 5 decimales
+    min_btc = 10.5 / price
+    btc_amount = max(btc_amount, min_btc)
+    btc_amount = math.ceil(btc_amount * 100000) / 100000  # ceil a 5 decimales
 
     pac_side = "bid" if side.upper() in ("BUY", "LONG") else "ask"
 
