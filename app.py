@@ -97,43 +97,53 @@ def get_btc_price():
         return 0.0
 
 def place_limit_order(side, price, size_usdc):
-    cfg        = get_cfg()
-    path       = "/orders/create"
-    ts         = str(int(time.time() * 1000))
-    # Convertir USDC a cantidad BTC
-    btc_price  = get_btc_price() or price
+    cfg       = get_cfg()
+    path      = "/orders/create"
+    ts        = int(time.time() * 1000)
+    btc_price = get_btc_price() or price
     # BTC: tick_size=1 (precio entero), lot_size=0.00001 (5 decimales)
     btc_amount = round(size_usdc / btc_price, 5)
-    btc_amount = max(btc_amount, 0.00001)   # mínimo 1 lot
-    # "bid" = comprar, "ask" = vender
-    pac_side   = "bid" if side.upper() in ("LONG", "BUY") else "ask"
-    # agent_wallet va en el HEADER, NO en el body (según docs de Pacifica)
-    body_dict  = {
-        "account":         cfg["pacifica_wallet"],
-        "timestamp":       int(ts),
-        "expiry_window":   5000,
+    btc_amount = max(btc_amount, 0.00001)
+    pac_side  = "bid" if side.upper() in ("LONG", "BUY") else "ask"
+
+    # ── Lo que se FIRMA: signature_header + signature_payload (sin account/agent_wallet) ──
+    signature_header = {
+        "timestamp":     ts,
+        "expiry_window": 5000,
+        "type":          "create_limit_order",   # ← campo obligatorio para la firma
+    }
+    signature_payload = {
         "symbol":          "BTC",
         "side":            pac_side,
-        "price":           str(int(round(price))),   # entero, sin decimales
-        "amount":          f"{btc_amount:.5f}",   # siempre decimal: "0.00007" no "7e-05"
+        "price":           str(int(round(price))),
+        "amount":          f"{btc_amount:.5f}",
         "tif":             "GTC",
         "reduce_only":     False,
         "client_order_id": str(uuid.uuid4()),
     }
-    # Firmar el body sin agent_wallet (sort_keys para orden determinista)
-    body_str   = json.dumps(body_dict, separators=(",", ":"), sort_keys=True)
-    sig        = sign_ed25519(cfg["pacifica_api_secret"], body_str)
-    body_dict["signature"] = sig
-    body_str   = json.dumps(body_dict, separators=(",", ":"), sort_keys=True)
+    message_dict = {**signature_header, **signature_payload}
+    message_str  = json.dumps(message_dict, separators=(",", ":"), sort_keys=True)
+    sig          = sign_ed25519(cfg["pacifica_api_secret"], message_str)
+
+    # ── Body completo que se envía (firma + metadata + payload) ──
+    request_body = {
+        "account":      cfg["pacifica_wallet"],
+        "agent_wallet": cfg["pacifica_api_key"],
+        "signature":    sig,
+        "timestamp":    ts,
+        "expiry_window": 5000,
+        **signature_payload,
+    }
+    body_str = json.dumps(request_body, separators=(",", ":"))
     try:
         base = "https://api.pacifica.fi/api/v1"
         resp = requests.post(f"{base}{path}",
-                             headers=pac_headers(cfg["pacifica_api_key"]),
+                             headers={"Content-Type": "application/json"},
                              data=body_str, timeout=10)
         print(f"[Pacifica] {pac_side} @ ${price:.1f} → {resp.status_code}: {resp.text[:400]}")
         resp.raise_for_status()
         return resp.json()
-    except requests.exceptions.HTTPError as e:
+    except requests.exceptions.HTTPError:
         print(f"[Pacifica] HTTP {resp.status_code} orden {side} @ ${price}: {resp.text[:400]}")
         return None
     except Exception as e:
