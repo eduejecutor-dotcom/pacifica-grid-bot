@@ -110,7 +110,7 @@ def place_limit_order(side, price, size_usdc):
     signature_header = {
         "timestamp":     ts,
         "expiry_window": 5000,
-        "type":          "create_limit_order",   # ← campo obligatorio para la firma
+        "type":          "create_order",   # tipo correcto según SDK oficial Pacifica
     }
     signature_payload = {
         "symbol":          "BTC",
