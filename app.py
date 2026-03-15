@@ -1,29 +1,28 @@
 """
 =============================================================
   PANEL WEB — GRID BOT PACIFICA.FI
-  Configura y controla el bot desde el navegador
+  Estrategia: Long-only Bullish Trend (perpetuos one-way)
+  - BUY limit orders en niveles bajo el precio actual
+  - SELL reduce_only se colocan reactivamente al llenar BUYs
 =============================================================
 """
 
 import json
 import time
 import uuid
-import hashlib
-import hmac
 import threading
 import requests
-import pandas as pd
 import base58
 import nacl.signing
-from datetime import datetime, date
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from flask import Flask, jsonify, request, render_template_string
 
-app    = Flask(__name__)
+app      = Flask(__name__)
 CHILE_TZ = ZoneInfo("America/Santiago")
 
 # ──────────────────────────────────────────────────────────
-#   CONFIGURACIÓN INICIAL (editable desde el panel)
+#   CONFIGURACIÓN INICIAL
 # ──────────────────────────────────────────────────────────
 
 DEFAULT_CONFIG = {
@@ -41,10 +40,9 @@ DEFAULT_CONFIG = {
     "check_interval":      15,
 }
 
-# Estado global del bot
 bot_state = {
-    "running":       False,
-    "config":        DEFAULT_CONFIG.copy(),
+    "running":      False,
+    "config":       DEFAULT_CONFIG.copy(),
     "status": {
         "trades_today":   0,
         "volume_today":   0.0,
@@ -55,11 +53,11 @@ bot_state = {
         "started_at":     "—",
         "grid_spacing":   0.0,
         "price_in_range": False,
-        "fills":          [],       # últimos 10 fills
+        "fills":          [],
     },
-    "thread": None,
-    "stop_event": threading.Event(),
-    "known_fills": set(),
+    "thread":       None,
+    "stop_event":   threading.Event(),
+    "known_fills":  set(),
 }
 
 # ──────────────────────────────────────────────────────────
@@ -70,20 +68,12 @@ def get_cfg():
     return bot_state["config"]
 
 def sign_ed25519(private_key_b58: str, message: str) -> str:
-    """Firma un mensaje con Ed25519 usando clave privada base58 de Solana."""
     key_bytes = base58.b58decode(private_key_b58)
     if len(key_bytes) == 64:
-        key_bytes = key_bytes[:32]   # formato keypair Solana: 32 priv + 32 pub
+        key_bytes = key_bytes[:32]
     signing_key = nacl.signing.SigningKey(key_bytes)
-    signed      = signing_key.sign(message.encode("utf-8"))
+    signed = signing_key.sign(message.encode("utf-8"))
     return base58.b58encode(signed.signature).decode()
-
-def pac_headers(agent_wallet: str = ""):
-    """Headers para Pacifica. agent_wallet va en el header, NO en el body."""
-    h = {"Content-Type": "application/json"}
-    if agent_wallet:
-        h["agent_wallet"] = agent_wallet
-    return h
 
 def get_btc_price():
     try:
@@ -93,23 +83,25 @@ def get_btc_price():
     except:
         return 0.0
 
-def place_limit_order(side, price, size_usdc):
-    cfg       = get_cfg()
-    path      = "/orders/create"
-    ts        = int(time.time() * 1000)
+def place_limit_order(side, price, size_usdc, reduce_only=False):
+    """
+    side: "BUY" (abrir long) o "SELL" (cerrar long)
+    reduce_only=True en SELL → nunca abre corto, solo cierra largo existente
+    """
+    cfg        = get_cfg()
+    ts         = int(time.time() * 1000)
     btc_price  = get_btc_price() or price
     leverage   = cfg.get("leverage", 5)
-    # amount = notional BTC (capital × apalancamiento / precio)
-    # Mínimo Pacifica: $10 USD notional = 0.000125 BTC a $80k
-    btc_amount = round((size_usdc * leverage) / btc_price, 5)
-    btc_amount = max(btc_amount, 0.00013)   # mínimo ~$10 USD a precio actual
-    pac_side  = "bid" if side.upper() in ("LONG", "BUY") else "ask"
 
-    # ── Lo que se FIRMA: signature_header + signature_payload (sin account/agent_wallet) ──
+    btc_amount = round((size_usdc * leverage) / btc_price, 5)
+    btc_amount = max(btc_amount, 0.00013)
+
+    pac_side = "bid" if side.upper() in ("BUY", "LONG") else "ask"
+
     signature_header = {
         "timestamp":     ts,
         "expiry_window": 5000,
-        "type":          "create_order",   # tipo correcto según SDK oficial Pacifica
+        "type":          "create_order",
     }
     signature_payload = {
         "symbol":          "BTC",
@@ -117,59 +109,94 @@ def place_limit_order(side, price, size_usdc):
         "price":           str(int(round(price))),
         "amount":          f"{btc_amount:.5f}",
         "tif":             "GTC",
-        "reduce_only":     False,
+        "reduce_only":     reduce_only,
         "client_order_id": str(uuid.uuid4()),
     }
-    # Estructura exacta del SDK oficial: payload anidado bajo "data"
-    message_dict = {
-        **signature_header,
-        "data": signature_payload,
-    }
+    message_dict = {**signature_header, "data": signature_payload}
     message_str  = json.dumps(message_dict, separators=(",", ":"), sort_keys=True)
     sig          = sign_ed25519(cfg["pacifica_api_secret"], message_str)
 
-    # ── Body completo que se envía (firma + metadata + payload) ──
     request_body = {
-        "account":      cfg["pacifica_wallet"],
-        "agent_wallet": cfg["pacifica_api_key"],
-        "signature":    sig,
-        "timestamp":    ts,
+        "account":       cfg["pacifica_wallet"],
+        "agent_wallet":  cfg["pacifica_api_key"],
+        "signature":     sig,
+        "timestamp":     ts,
+        "expiry_window": 5000,
+        **signature_payload,
+    }
+    body_str = json.dumps(request_body, separators=(",", ":"))
+    ro_tag   = " [reduce_only]" if reduce_only else ""
+    try:
+        base = "https://api.pacifica.fi/api/v1"
+        resp = requests.post(f"{base}/orders/create",
+                             headers={"Content-Type": "application/json"},
+                             data=body_str, timeout=10)
+        print(f"[Pacifica] {pac_side}{ro_tag} @ ${price:.0f} → {resp.status_code}: {resp.text[:200]}")
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.HTTPError:
+        print(f"[Pacifica] HTTP {resp.status_code} {side}{ro_tag} @ ${price}: {resp.text[:200]}")
+        return None
+    except Exception as e:
+        print(f"[Pacifica] Error {side} @ ${price}: {e}")
+        return None
+
+def cancel_all_orders():
+    """Cancela todas las órdenes abiertas en BTC."""
+    cfg = get_cfg()
+    ts  = int(time.time() * 1000)
+    signature_header = {
+        "timestamp":     ts,
+        "expiry_window": 5000,
+        "type":          "cancel_all_orders",
+    }
+    signature_payload = {"symbol": "BTC"}
+    message_dict = {**signature_header, "data": signature_payload}
+    message_str  = json.dumps(message_dict, separators=(",", ":"), sort_keys=True)
+    sig          = sign_ed25519(cfg["pacifica_api_secret"], message_str)
+    request_body = {
+        "account":       cfg["pacifica_wallet"],
+        "agent_wallet":  cfg["pacifica_api_key"],
+        "signature":     sig,
+        "timestamp":     ts,
         "expiry_window": 5000,
         **signature_payload,
     }
     body_str = json.dumps(request_body, separators=(",", ":"))
     try:
         base = "https://api.pacifica.fi/api/v1"
-        resp = requests.post(f"{base}{path}",
-                             headers={"Content-Type": "application/json"},
-                             data=body_str, timeout=10)
-        print(f"[Pacifica] {pac_side} @ ${price:.1f} → {resp.status_code}: {resp.text[:400]}")
+        resp = requests.delete(f"{base}/orders/cancel-all",
+                               headers={"Content-Type": "application/json"},
+                               data=body_str, timeout=10)
+        print(f"[Pacifica] cancel-all → {resp.status_code}: {resp.text[:200]}")
         resp.raise_for_status()
         return resp.json()
     except requests.exceptions.HTTPError:
-        print(f"[Pacifica] HTTP {resp.status_code} orden {side} @ ${price}: {resp.text[:400]}")
+        print(f"[Pacifica] cancel-all HTTP {resp.status_code}: {resp.text[:200]}")
         return None
     except Exception as e:
-        print(f"[Pacifica] Error orden {side} @ ${price}: {e}")
+        print(f"[Pacifica] Error cancel-all: {e}")
         return None
 
 def get_open_orders():
-    cfg  = get_cfg()
-    path = f"/orders?symbol=BTC&status=open&account={cfg['pacifica_wallet']}"
+    cfg = get_cfg()
     try:
         base = "https://api.pacifica.fi/api/v1"
-        resp = requests.get(f"{base}{path}", headers=pac_headers(), timeout=10)
+        resp = requests.get(
+            f"{base}/orders?symbol=BTC&status=open&account={cfg['pacifica_wallet']}",
+            headers={"Content-Type": "application/json"}, timeout=10)
         resp.raise_for_status()
         return resp.json().get("data", [])
     except:
         return []
 
 def get_order_history():
-    cfg  = get_cfg()
-    path = f"/orders/history?symbol=BTC&limit=50&account={cfg['pacifica_wallet']}"
+    cfg = get_cfg()
     try:
         base = "https://api.pacifica.fi/api/v1"
-        resp = requests.get(f"{base}{path}", headers=pac_headers(), timeout=10)
+        resp = requests.get(
+            f"{base}/orders/history?symbol=BTC&limit=50&account={cfg['pacifica_wallet']}",
+            headers={"Content-Type": "application/json"}, timeout=10)
         resp.raise_for_status()
         return resp.json().get("data", [])
     except:
@@ -181,29 +208,36 @@ def send_telegram(msg):
         requests.post(
             f"https://api.telegram.org/bot{cfg['telegram_token']}/sendMessage",
             json={"chat_id": cfg["telegram_chat_id"], "text": msg},
-            timeout=10
-        )
+            timeout=10)
     except:
         pass
 
 # ──────────────────────────────────────────────────────────
-#   GRID BOT LOGIC
+#   GRID BOT — ESTRATEGIA LONG-ONLY BULLISH TREND
 # ──────────────────────────────────────────────────────────
 
 def initialize_grid(current_price, grid_levels, usdc_per_grid):
-    orders = {}
-    cfg    = get_cfg()
+    """
+    Solo coloca BUY (open long) en niveles BAJO el precio actual.
+    Las SELL reduce_only se colocan reactivamente cuando se llenan los BUYs.
+    Así nunca hay órdenes cortas — el bot es 100% long-only.
+    """
+    orders  = {}
+    cfg     = get_cfg()
+    placed  = 0
+    failed  = 0
+
     for level in grid_levels:
         if cfg["grid_lower"] <= level < current_price:
-            r = place_limit_order("LONG", level, usdc_per_grid)
+            r = place_limit_order("BUY", level, usdc_per_grid, reduce_only=False)
             if r and r.get("data"):
-                orders[level] = {"id": r["data"].get("order_id",""), "side": "buy"}
-            time.sleep(0.2)
-        elif current_price < level <= cfg["grid_upper"]:
-            r = place_limit_order("SHORT", level, usdc_per_grid)
-            if r and r.get("data"):
-                orders[level] = {"id": r["data"].get("order_id",""), "side": "sell"}
-            time.sleep(0.2)
+                orders[level] = {"id": r["data"].get("order_id", ""), "side": "buy"}
+                placed += 1
+            else:
+                failed += 1
+            time.sleep(0.3)
+
+    print(f"[GRID] Init: {placed} BUY órdenes colocadas, {failed} fallidas")
     return orders
 
 def grid_bot_loop(stop_event):
@@ -216,23 +250,20 @@ def grid_bot_loop(stop_event):
     check_interval = cfg["check_interval"]
     symbol         = cfg["symbol"]
 
-    grid_spacing   = (grid_upper - grid_lower) / grid_count
-    usdc_per_grid  = capital / grid_count
-    vol_per_trade  = usdc_per_grid * leverage
+    grid_spacing  = (grid_upper - grid_lower) / grid_count
+    usdc_per_grid = capital / grid_count
+    vol_per_trade = usdc_per_grid * leverage
 
-    # Calcular niveles
     grid_levels = [round(grid_lower + i * grid_spacing, 1) for i in range(grid_count + 1)]
 
-    # Precio actual
     current_price = get_btc_price()
-    bot_state["status"]["current_price"] = current_price
-    bot_state["status"]["grid_spacing"]  = round(grid_spacing, 1)
-    bot_state["status"]["started_at"]    = datetime.now(CHILE_TZ).strftime("%d/%m/%Y %H:%M")
+    bot_state["status"]["current_price"]  = current_price
+    bot_state["status"]["grid_spacing"]   = round(grid_spacing, 1)
+    bot_state["status"]["started_at"]     = datetime.now(CHILE_TZ).strftime("%d/%m/%Y %H:%M")
     bot_state["status"]["price_in_range"] = grid_lower <= current_price <= grid_upper
 
-    print(f"[GRID] Iniciando | BTC: ${current_price:,.1f} | Spacing: ${grid_spacing:,.1f}")
+    print(f"[GRID] Iniciando | BTC: ${current_price:,.1f} | Spacing: ${grid_spacing:,.1f} | Long-only")
 
-    # Verificar rango
     if not (grid_lower <= current_price <= grid_upper):
         msg = (f"⚠️ Precio ${current_price:,.1f} FUERA del rango "
                f"(${grid_lower:,.0f} — ${grid_upper:,.0f}). Ajusta los parámetros.")
@@ -240,32 +271,29 @@ def grid_bot_loop(stop_event):
         bot_state["running"] = False
         return
 
-    # Inicializar grid
     orders = initialize_grid(current_price, grid_levels, usdc_per_grid)
     buys   = sum(1 for o in orders.values() if o["side"] == "buy")
-    sells  = sum(1 for o in orders.values() if o["side"] == "sell")
 
     send_telegram(
-        f"🤖 Grid Bot iniciado\n"
+        f"🤖 Grid Bot LONG iniciado\n"
         f"Par: {symbol} | {leverage}x\n"
         f"Rango: ${grid_lower:,.0f} — ${grid_upper:,.0f}\n"
         f"Grids: {grid_count} | Spacing: ${grid_spacing:,.0f}\n"
-        f"BUY: {buys} | SELL: {sells}\n"
-        f"Volumen/trade: ${vol_per_trade:.0f} USDC"
+        f"BUY órdenes: {buys}\n"
+        f"Estrategia: Long-only (Bullish Trend)\n"
+        f"Vol/trade: ${vol_per_trade:.0f} USDC"
     )
 
-    known_fills    = bot_state["known_fills"]
-    last_rpt_hour  = -1
+    known_fills   = bot_state["known_fills"]
+    last_rpt_hour = -1
 
     while not stop_event.is_set():
         try:
-            # Precio actual
             price = get_btc_price()
             if price:
                 bot_state["status"]["current_price"]  = price
                 bot_state["status"]["price_in_range"] = grid_lower <= price <= grid_upper
 
-            # Revisar fills
             history = get_order_history()
             for order in history:
                 oid    = order.get("order_id", "")
@@ -284,7 +312,6 @@ def grid_bot_loop(stop_event):
                 bot_state["status"]["volume_today"] += vol
                 bot_state["status"]["last_fill"]     = f"{side.upper()} @ ${fill_price:,.1f} — {hora}"
 
-                # Agregar a historial de fills (últimos 10)
                 bot_state["status"]["fills"].insert(0, {
                     "side":  side.upper(),
                     "price": fill_price,
@@ -293,29 +320,37 @@ def grid_bot_loop(stop_event):
                 })
                 bot_state["status"]["fills"] = bot_state["status"]["fills"][:10]
 
-                # Colocar orden contraria
-                if side in ("long", "buy"):
+                if side in ("long", "buy", "bid"):
+                    # BUY se llenó → largo abierto → colocar SELL take-profit (reduce_only)
                     target = round(fill_price + grid_spacing, 1)
                     profit = round((grid_spacing / fill_price) * fill_size * leverage, 4)
                     bot_state["status"]["profit_usdc"] += profit
                     if target <= grid_upper:
-                        r = place_limit_order("SHORT", target, fill_size)
+                        r = place_limit_order("SELL", target, fill_size, reduce_only=True)
                         if r and r.get("data"):
-                            orders[target] = {"id": r["data"].get("order_id",""), "side": "sell"}
-                    send_telegram(f"✅ BUY llenado @ ${fill_price:,.1f}\nSELL TP → ${target:,.1f}\nTrades hoy: {bot_state['status']['trades_today']} | Vol: ${bot_state['status']['volume_today']:,.0f}")
+                            orders[target] = {"id": r["data"].get("order_id", ""), "side": "sell"}
+                    send_telegram(
+                        f"✅ BUY llenado @ ${fill_price:,.1f}\n"
+                        f"SELL TP → ${target:,.1f}\n"
+                        f"Profit est: ${profit:.4f}\n"
+                        f"Trades: {bot_state['status']['trades_today']} | Vol: ${bot_state['status']['volume_today']:,.0f}"
+                    )
                 else:
+                    # SELL se llenó → largo cerrado con ganancia → re-colocar BUY
                     target = round(fill_price - grid_spacing, 1)
                     if target >= grid_lower:
-                        r = place_limit_order("LONG", target, fill_size)
+                        r = place_limit_order("BUY", target, fill_size, reduce_only=False)
                         if r and r.get("data"):
-                            orders[target] = {"id": r["data"].get("order_id",""), "side": "buy"}
-                    send_telegram(f"✅ SELL llenado @ ${fill_price:,.1f}\nBUY re-entrada → ${target:,.1f}\nTrades hoy: {bot_state['status']['trades_today']} | Vol: ${bot_state['status']['volume_today']:,.0f}")
+                            orders[target] = {"id": r["data"].get("order_id", ""), "side": "buy"}
+                    send_telegram(
+                        f"💰 SELL TP @ ${fill_price:,.1f}\n"
+                        f"BUY re-entrada → ${target:,.1f}\n"
+                        f"Trades: {bot_state['status']['trades_today']} | Vol: ${bot_state['status']['volume_today']:,.0f}"
+                    )
 
-            # Órdenes activas
             open_orders = get_open_orders()
             bot_state["status"]["active_orders"] = len(open_orders)
 
-            # Reporte horario
             hora_actual = datetime.now(CHILE_TZ).hour
             if hora_actual != last_rpt_hour:
                 send_telegram(
@@ -365,6 +400,7 @@ HTML = """<!DOCTYPE html>
   .btn-start  { background: #238636; color: #fff; }
   .btn-stop   { background: #da3633; color: #fff; }
   .btn-save   { background: #1f6feb; color: #fff; margin-bottom: 8px; }
+  .btn-cancel { background: #6e40c9; color: #fff; margin-top: 8px; }
   .stat { display: flex; justify-content: space-between; align-items: center;
           padding: 8px 0; border-bottom: 1px solid #21262d; }
   .stat:last-child { border-bottom: none; }
@@ -373,6 +409,7 @@ HTML = """<!DOCTYPE html>
   .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
   .badge-on  { background: #1a4731; color: #3fb950; }
   .badge-off { background: #3d1f1f; color: #f85149; }
+  .badge-strategy { background: #1a3050; color: #58a6ff; font-size: 0.72rem; padding: 2px 8px; border-radius: 10px; }
   .fills-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 8px; }
   .fills-table th { color: #8b949e; text-align: left; padding: 6px 8px; border-bottom: 1px solid #21262d; }
   .fills-table td { padding: 6px 8px; border-bottom: 1px solid #161b22; }
@@ -384,12 +421,15 @@ HTML = """<!DOCTYPE html>
   .grid-info-item { background: #0d1117; border-radius: 6px; padding: 10px; text-align: center; }
   .grid-info-item .val { font-size: 1.1rem; font-weight: 700; color: #58a6ff; }
   .grid-info-item .lbl { font-size: 0.75rem; color: #8b949e; margin-top: 2px; }
+  .strategy-box { background: #0d1117; border-radius: 6px; padding: 10px 14px; margin-top: 12px;
+                  font-size: 0.8rem; color: #8b949e; line-height: 1.6; }
+  .strategy-box b { color: #3fb950; }
 </style>
 </head>
 <body>
 <div style="max-width:1000px;margin:0 auto;">
   <h1>⚡ Grid Bot — Pacifica.fi</h1>
-  <h2>Futures Grid Trading · Bullish Trend</h2>
+  <h2>Futures Grid Trading · <span class="badge-strategy">Long-only · Bullish Trend</span></h2>
 
   <div id="warning" class="warning" style="display:none">
     ⚠️ El precio actual está fuera del rango configurado. Ajusta los límites.
@@ -452,21 +492,27 @@ HTML = """<!DOCTYPE html>
         </div>
       </div>
 
+      <div class="strategy-box">
+        📈 <b>Long-only:</b> BUY bajo precio actual → cuando llena, SELL take-profit arriba.<br>
+        Sin posiciones cortas. Gana en cada rebote del grid.
+      </div>
+
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">
         <button class="btn btn-start" onclick="startBot()">▶ INICIAR</button>
         <button class="btn btn-stop"  onclick="stopBot()">■ DETENER</button>
       </div>
+      <button class="btn btn-cancel" onclick="cancelOrders()">🗑 Cancelar todas las órdenes</button>
     </div>
 
     <!-- CONFIG -->
     <div class="card">
       <h3>⚙️ Configuración del Grid</h3>
       <label>Precio mínimo del rango (USDC)</label>
-      <input id="grid_lower" type="number" placeholder="65000">
+      <input id="grid_lower" type="number" placeholder="50000">
       <label>Precio máximo del rango (USDC)</label>
-      <input id="grid_upper" type="number" placeholder="78000">
+      <input id="grid_upper" type="number" placeholder="80000">
       <label>Número de grids</label>
-      <input id="grid_count" type="number" placeholder="20" min="5" max="100">
+      <input id="grid_count" type="number" placeholder="20" min="5" max="200">
       <label>Capital total (USDC)</label>
       <input id="capital_usdc" type="number" placeholder="100">
       <label>Apalancamiento (x)</label>
@@ -505,14 +551,13 @@ HTML = """<!DOCTYPE html>
 <script>
 function loadConfig() {
   fetch('/api/config').then(r => r.json()).then(cfg => {
-    document.getElementById('grid_lower').value        = cfg.grid_lower;
-    document.getElementById('grid_upper').value        = cfg.grid_upper;
-    document.getElementById('grid_count').value        = cfg.grid_count;
-    document.getElementById('capital_usdc').value      = cfg.capital_usdc;
-    document.getElementById('leverage').value          = cfg.leverage;
-    document.getElementById('pacifica_api_key').value  = cfg.pacifica_api_key;
-    document.getElementById('pacifica_wallet').value   = cfg.pacifica_wallet;
-    // No mostrar el secret por seguridad
+    document.getElementById('grid_lower').value       = cfg.grid_lower;
+    document.getElementById('grid_upper').value       = cfg.grid_upper;
+    document.getElementById('grid_count').value       = cfg.grid_count;
+    document.getElementById('capital_usdc').value     = cfg.capital_usdc;
+    document.getElementById('leverage').value         = cfg.leverage;
+    document.getElementById('pacifica_api_key').value = cfg.pacifica_api_key;
+    document.getElementById('pacifica_wallet').value  = cfg.pacifica_wallet;
     updateGridInfo(cfg);
   });
 }
@@ -554,6 +599,12 @@ function stopBot() {
     .then(res => { if (!res.ok) alert('❌ ' + res.error); });
 }
 
+function cancelOrders() {
+  if (!confirm('¿Cancelar TODAS las órdenes abiertas en Pacifica?')) return;
+  fetch('/api/cancel', {method:'POST'}).then(r => r.json())
+    .then(res => { alert(res.ok ? '✅ Órdenes canceladas' : '❌ Error: ' + (res.error || 'desconocido')); });
+}
+
 function updateStatus() {
   fetch('/api/status').then(r => r.json()).then(s => {
     const running = s.running;
@@ -567,15 +618,13 @@ function updateStatus() {
     document.getElementById('st-profit').textContent  = '$' + s.status.profit_usdc.toFixed(4);
     document.getElementById('st-lastfill').textContent = s.status.last_fill;
     document.getElementById('st-started').textContent  = s.status.started_at;
-
     document.getElementById('warning').style.display = (!running && s.status.current_price && !s.status.price_in_range) ? 'block' : 'none';
 
-    // Fills table
     const tbody = document.getElementById('fills-body');
     if (s.status.fills && s.status.fills.length > 0) {
       tbody.innerHTML = s.status.fills.map(f =>
         `<tr>
-          <td class="${f.side === 'LONG' || f.side === 'BUY' ? 'buy' : 'sell'}">${f.side}</td>
+          <td class="${f.side === 'BUY' || f.side === 'BID' ? 'buy' : 'sell'}">${f.side}</td>
           <td>$${f.price.toLocaleString('es-CL')}</td>
           <td>$${f.vol}</td>
           <td>${f.time}</td>
@@ -587,7 +636,7 @@ function updateStatus() {
 
 loadConfig();
 updateStatus();
-setInterval(updateStatus, 5000);  // actualiza cada 5 segundos
+setInterval(updateStatus, 5000);
 </script>
 </body>
 </html>"""
@@ -599,7 +648,7 @@ def index():
 @app.route("/api/config", methods=["GET"])
 def api_get_config():
     cfg = bot_state["config"].copy()
-    cfg.pop("pacifica_api_secret", None)   # no exponer el secret en GET
+    cfg.pop("pacifica_api_secret", None)
     return jsonify(cfg)
 
 @app.route("/api/config", methods=["POST"])
@@ -620,13 +669,12 @@ def api_start():
     if not cfg["pacifica_api_key"] or not cfg["pacifica_api_secret"]:
         return jsonify({"ok": False, "error": "Configura las API keys de Pacifica primero."})
 
-    # Reset contadores
-    bot_state["status"]["trades_today"]  = 0
-    bot_state["status"]["volume_today"]  = 0.0
-    bot_state["status"]["profit_usdc"]   = 0.0
-    bot_state["status"]["fills"]         = []
-    bot_state["status"]["last_fill"]     = "—"
-    bot_state["known_fills"]             = set()
+    bot_state["status"]["trades_today"] = 0
+    bot_state["status"]["volume_today"] = 0.0
+    bot_state["status"]["profit_usdc"]  = 0.0
+    bot_state["status"]["fills"]        = []
+    bot_state["status"]["last_fill"]    = "—"
+    bot_state["known_fills"]            = set()
 
     stop_evt = threading.Event()
     bot_state["stop_event"] = stop_evt
@@ -644,6 +692,16 @@ def api_stop():
     bot_state["stop_event"].set()
     bot_state["running"] = False
     return jsonify({"ok": True})
+
+@app.route("/api/cancel", methods=["POST"])
+def api_cancel():
+    cfg = bot_state["config"]
+    if not cfg["pacifica_api_key"] or not cfg["pacifica_api_secret"]:
+        return jsonify({"ok": False, "error": "Configura las API keys primero."})
+    result = cancel_all_orders()
+    if result is not None:
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "No se pudo cancelar. Revisa los logs."})
 
 @app.route("/api/status")
 def api_status():
