@@ -100,10 +100,12 @@ def place_limit_order(side, price, size_usdc):
     cfg       = get_cfg()
     path      = "/orders/create"
     ts        = int(time.time() * 1000)
-    btc_price = get_btc_price() or price
-    # BTC: tick_size=1 (precio entero), lot_size=0.00001 (5 decimales)
-    btc_amount = round(size_usdc / btc_price, 5)
-    btc_amount = max(btc_amount, 0.00001)
+    btc_price  = get_btc_price() or price
+    leverage   = cfg.get("leverage", 5)
+    # amount = notional BTC (capital × apalancamiento / precio)
+    # Mínimo Pacifica: $10 USD notional = 0.000125 BTC a $80k
+    btc_amount = round((size_usdc * leverage) / btc_price, 5)
+    btc_amount = max(btc_amount, 0.00013)   # mínimo ~$10 USD a precio actual
     pac_side  = "bid" if side.upper() in ("LONG", "BUY") else "ask"
 
     # ── Lo que se FIRMA: signature_header + signature_payload (sin account/agent_wallet) ──
