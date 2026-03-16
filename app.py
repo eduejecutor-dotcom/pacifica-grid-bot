@@ -279,6 +279,14 @@ def grid_bot_loop(stop_event):
     orders = initialize_grid(current_price, grid_levels, usdc_per_grid)
     buys   = sum(1 for o in orders.values() if o["side"] == "buy")
 
+    # Mapa de seguimiento: order_id → {price, side}
+    # Cuando una orden desaparece de "abiertas" = se llenó
+    order_map = {
+        info["id"]: {"price": level, "side": info["side"]}
+        for level, info in orders.items()
+        if info["id"]
+    }
+
     send_telegram(
         f"🤖 Grid Bot LONG iniciado\n"
         f"Par: {symbol} | {leverage}x\n"
@@ -299,25 +307,28 @@ def grid_bot_loop(stop_event):
                 bot_state["status"]["current_price"]  = price
                 bot_state["status"]["price_in_range"] = grid_lower <= price <= grid_upper
 
-            history = get_order_history()
-            for order in history:
-                oid    = order.get("order_id", "")
-                status = order.get("status", "").lower()
-                if status not in ("filled", "fill", "complete", "completed") or oid in known_fills:
-                    continue
+            # ── Detección de fills por desaparición de órdenes abiertas ──
+            open_orders  = get_open_orders()
+            current_ids  = {o.get("order_id", "") for o in open_orders if o.get("order_id")}
+            bot_state["status"]["active_orders"] = len(open_orders)
 
+            for oid in list(order_map.keys()):
+                if oid in current_ids or oid in known_fills:
+                    continue  # sigue abierta o ya procesada
+
+                # Desapareció → se llenó
                 known_fills.add(oid)
-                side       = order.get("side", "").lower()
-                fill_price = float(order.get("price", 0) or order.get("avg_price", 0) or order.get("filled_price", 0))
-                fill_size  = float(order.get("size", 0) or order.get("amount", 0) or usdc_per_grid)
-                print(f"[FILL] side={side} price={fill_price} size={fill_size} status={status}")
-                vol        = fill_size * leverage
+                details    = order_map.pop(oid)
+                side       = details["side"]
+                fill_price = details["price"]
                 hora       = datetime.now(CHILE_TZ).strftime("%H:%M CLT")
+                vol        = usdc_per_grid * leverage
+
+                print(f"[FILL] {side.upper()} @ ${fill_price:,.0f} detectado por desaparición")
 
                 bot_state["status"]["trades_today"] += 1
                 bot_state["status"]["volume_today"] += vol
                 bot_state["status"]["last_fill"]     = f"{side.upper()} @ ${fill_price:,.1f} — {hora}"
-
                 bot_state["status"]["fills"].insert(0, {
                     "side":  side.upper(),
                     "price": fill_price,
@@ -326,15 +337,16 @@ def grid_bot_loop(stop_event):
                 })
                 bot_state["status"]["fills"] = bot_state["status"]["fills"][:10]
 
-                if side in ("long", "buy", "bid"):
-                    # BUY se llenó → largo abierto → colocar SELL take-profit (reduce_only)
+                if side == "buy":
+                    # BUY llenado → colocar SELL TP reduce_only arriba
                     target = round(fill_price + grid_spacing, 1)
-                    profit = round((grid_spacing / fill_price) * fill_size * leverage, 4)
+                    profit = round((grid_spacing / fill_price) * usdc_per_grid * leverage, 4)
                     bot_state["status"]["profit_usdc"] += profit
                     if target <= grid_upper:
-                        r = place_limit_order("SELL", target, fill_size, reduce_only=True)
+                        r = place_limit_order("SELL", target, usdc_per_grid, reduce_only=True)
                         if r and r.get("data"):
-                            orders[target] = {"id": r["data"].get("order_id", ""), "side": "sell"}
+                            new_id = r["data"].get("order_id", "")
+                            order_map[new_id] = {"price": target, "side": "sell"}
                     send_telegram(
                         f"✅ BUY llenado @ ${fill_price:,.1f}\n"
                         f"SELL TP → ${target:,.1f}\n"
@@ -342,20 +354,18 @@ def grid_bot_loop(stop_event):
                         f"Trades: {bot_state['status']['trades_today']} | Vol: ${bot_state['status']['volume_today']:,.0f}"
                     )
                 else:
-                    # SELL se llenó → largo cerrado con ganancia → re-colocar BUY
+                    # SELL TP llenado → re-colocar BUY abajo
                     target = round(fill_price - grid_spacing, 1)
                     if target >= grid_lower:
-                        r = place_limit_order("BUY", target, fill_size, reduce_only=False)
+                        r = place_limit_order("BUY", target, usdc_per_grid, reduce_only=False)
                         if r and r.get("data"):
-                            orders[target] = {"id": r["data"].get("order_id", ""), "side": "buy"}
+                            new_id = r["data"].get("order_id", "")
+                            order_map[new_id] = {"price": target, "side": "buy"}
                     send_telegram(
                         f"💰 SELL TP @ ${fill_price:,.1f}\n"
                         f"BUY re-entrada → ${target:,.1f}\n"
                         f"Trades: {bot_state['status']['trades_today']} | Vol: ${bot_state['status']['volume_today']:,.0f}"
                     )
-
-            open_orders = get_open_orders()
-            bot_state["status"]["active_orders"] = len(open_orders)
 
             hora_actual = datetime.now(CHILE_TZ).hour
             if hora_actual != last_rpt_hour:
