@@ -302,14 +302,15 @@ def grid_bot_loop(stop_event):
             history = get_order_history()
             for order in history:
                 oid    = order.get("order_id", "")
-                status = order.get("status", "")
-                if status != "filled" or oid in known_fills:
+                status = order.get("status", "").lower()
+                if status not in ("filled", "fill", "complete", "completed") or oid in known_fills:
                     continue
 
                 known_fills.add(oid)
                 side       = order.get("side", "").lower()
-                fill_price = float(order.get("price", 0))
-                fill_size  = float(order.get("size", usdc_per_grid))
+                fill_price = float(order.get("price", 0) or order.get("avg_price", 0) or order.get("filled_price", 0))
+                fill_size  = float(order.get("size", 0) or order.get("amount", 0) or usdc_per_grid)
+                print(f"[FILL] side={side} price={fill_price} size={fill_size} status={status}")
                 vol        = fill_size * leverage
                 hora       = datetime.now(CHILE_TZ).strftime("%H:%M CLT")
 
