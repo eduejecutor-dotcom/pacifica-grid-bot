@@ -385,167 +385,430 @@ HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Grid Bot — Pacifica.fi</title>
+<title>GRID BOT // PACIFICA.fi</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
+  :root {
+    --sol-green:  #14F195;
+    --sol-purple: #9945FF;
+    --sol-blue:   #03E1FF;
+    --bg:         #05050f;
+    --bg2:        #0b0b1a;
+    --bg3:        #0f0f22;
+    --border:     rgba(153,69,255,0.3);
+    --border-g:   rgba(20,241,149,0.25);
+    --text:       #c8d0e0;
+    --dim:        #4a5568;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', sans-serif; padding: 20px; }
-  h1 { color: #58a6ff; margin-bottom: 4px; font-size: 1.4rem; }
-  h2 { color: #8b949e; font-size: 0.85rem; font-weight: 400; margin-bottom: 20px; }
-  h3 { color: #58a6ff; font-size: 1rem; margin-bottom: 12px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 1000px; margin: 0 auto; }
-  .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 20px; }
-  .card.full { grid-column: 1 / -1; }
-  label { display: block; font-size: 0.82rem; color: #8b949e; margin-bottom: 4px; }
-  input { width: 100%; background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
-          color: #e6edf3; padding: 8px 10px; font-size: 0.9rem; margin-bottom: 12px; }
-  input:focus { outline: none; border-color: #58a6ff; }
-  .btn { width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 0.95rem;
-         font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
-  .btn:hover { opacity: 0.85; }
-  .btn-start  { background: #238636; color: #fff; }
-  .btn-stop   { background: #da3633; color: #fff; }
-  .btn-save   { background: #1f6feb; color: #fff; margin-bottom: 8px; }
-  .btn-cancel { background: #6e40c9; color: #fff; margin-top: 8px; }
-  .stat { display: flex; justify-content: space-between; align-items: center;
-          padding: 8px 0; border-bottom: 1px solid #21262d; }
-  .stat:last-child { border-bottom: none; }
-  .stat-label { font-size: 0.83rem; color: #8b949e; }
-  .stat-value { font-size: 0.95rem; font-weight: 600; color: #e6edf3; }
-  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
-  .badge-on  { background: #1a4731; color: #3fb950; }
-  .badge-off { background: #3d1f1f; color: #f85149; }
-  .badge-strategy { background: #1a3050; color: #58a6ff; font-size: 0.72rem; padding: 2px 8px; border-radius: 10px; }
-  .fills-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 8px; }
-  .fills-table th { color: #8b949e; text-align: left; padding: 6px 8px; border-bottom: 1px solid #21262d; }
-  .fills-table td { padding: 6px 8px; border-bottom: 1px solid #161b22; }
-  .buy  { color: #3fb950; }
-  .sell { color: #f85149; }
-  .warning { background: #3d2b1f; border: 1px solid #d29922; border-radius: 6px;
-             padding: 10px 14px; font-size: 0.83rem; color: #d29922; margin-bottom: 16px; }
-  .grid-info { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 12px; }
-  .grid-info-item { background: #0d1117; border-radius: 6px; padding: 10px; text-align: center; }
-  .grid-info-item .val { font-size: 1.1rem; font-weight: 700; color: #58a6ff; }
-  .grid-info-item .lbl { font-size: 0.75rem; color: #8b949e; margin-top: 2px; }
-  .strategy-box { background: #0d1117; border-radius: 6px; padding: 10px 14px; margin-top: 12px;
-                  font-size: 0.8rem; color: #8b949e; line-height: 1.6; }
-  .strategy-box b { color: #3fb950; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 15px;
+    padding: 24px 20px;
+    min-height: 100vh;
+    background-image:
+      linear-gradient(rgba(153,69,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(153,69,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* scanline overlay */
+  body::before {
+    content: '';
+    position: fixed; top:0; left:0; right:0; bottom:0;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  .wrap { max-width: 1020px; margin: 0 auto; }
+
+  /* HEADER */
+  .header { margin-bottom: 28px; position: relative; }
+  .header-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.7rem;
+    color: var(--sol-green);
+    text-shadow: 0 0 20px rgba(20,241,149,0.6), 0 0 40px rgba(20,241,149,0.2);
+    letter-spacing: 2px;
+  }
+  .header-title span { color: var(--sol-purple); text-shadow: 0 0 20px rgba(153,69,255,0.7); }
+  .header-sub {
+    font-size: 0.78rem;
+    color: var(--dim);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-top: 4px;
+    font-family: 'Share Tech Mono', monospace;
+  }
+  .header-tag {
+    display: inline-block;
+    font-size: 0.68rem;
+    padding: 2px 10px;
+    border: 1px solid var(--sol-purple);
+    color: var(--sol-purple);
+    letter-spacing: 2px;
+    margin-left: 12px;
+    text-shadow: 0 0 8px rgba(153,69,255,0.5);
+    box-shadow: 0 0 8px rgba(153,69,255,0.2);
+  }
+
+  /* GRID LAYOUT */
+  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+  /* CARD */
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    padding: 20px;
+    position: relative;
+    clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%);
+    box-shadow: 0 0 20px rgba(153,69,255,0.08), inset 0 0 30px rgba(153,69,255,0.03);
+  }
+  .card::before {
+    content: '';
+    position: absolute; top:0; left:0; right:0; height:1px;
+    background: linear-gradient(90deg, transparent, var(--sol-purple), var(--sol-green), transparent);
+    opacity: 0.6;
+  }
+  .card-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--sol-purple);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    text-shadow: 0 0 10px rgba(153,69,255,0.5);
+  }
+  .card-title::before { content: '// '; opacity: 0.5; }
+
+  /* STATS */
+  .stat {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(153,69,255,0.1);
+  }
+  .stat:last-of-type { border-bottom: none; }
+  .stat-label {
+    font-size: 0.78rem;
+    color: var(--dim);
+    letter-spacing: 1px;
+    font-family: 'Share Tech Mono', monospace;
+  }
+  .stat-value {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.9rem;
+    color: var(--sol-blue);
+    text-shadow: 0 0 8px rgba(3,225,255,0.4);
+  }
+
+  /* BADGES */
+  .badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+    padding: 3px 12px;
+    letter-spacing: 2px;
+    border: 1px solid;
+    clip-path: polygon(6px 0%, 100% 0%, calc(100% - 6px) 100%, 0% 100%);
+  }
+  .badge-on {
+    border-color: var(--sol-green);
+    color: var(--sol-green);
+    background: rgba(20,241,149,0.08);
+    text-shadow: 0 0 10px rgba(20,241,149,0.7);
+    box-shadow: 0 0 12px rgba(20,241,149,0.2);
+  }
+  .badge-off {
+    border-color: #ff4466;
+    color: #ff4466;
+    background: rgba(255,68,102,0.08);
+    text-shadow: 0 0 10px rgba(255,68,102,0.5);
+  }
+
+  /* GRID INFO BOXES */
+  .grid-info { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 14px 0; }
+  .gi {
+    background: var(--bg3);
+    border: 1px solid var(--border-g);
+    padding: 10px 8px;
+    text-align: center;
+    clip-path: polygon(4px 0%, 100% 0%, calc(100% - 4px) 100%, 0% 100%);
+  }
+  .gi .val {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1rem;
+    color: var(--sol-green);
+    text-shadow: 0 0 10px rgba(20,241,149,0.5);
+  }
+  .gi .lbl {
+    font-size: 0.65rem;
+    color: var(--dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  /* STRATEGY BOX */
+  .strategy-box {
+    background: rgba(20,241,149,0.04);
+    border: 1px solid rgba(20,241,149,0.15);
+    border-left: 3px solid var(--sol-green);
+    padding: 10px 14px;
+    font-size: 0.78rem;
+    color: var(--dim);
+    line-height: 1.7;
+    margin: 14px 0;
+    font-family: 'Share Tech Mono', monospace;
+  }
+  .strategy-box b { color: var(--sol-green); }
+
+  /* BUTTONS */
+  .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+  .btn {
+    width: 100%;
+    padding: 10px 6px;
+    border: none;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.78rem;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.2s;
+    clip-path: polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%);
+    text-transform: uppercase;
+  }
+  .btn-start {
+    background: linear-gradient(135deg, rgba(20,241,149,0.15), rgba(20,241,149,0.05));
+    color: var(--sol-green);
+    border: 1px solid var(--sol-green);
+    text-shadow: 0 0 8px rgba(20,241,149,0.6);
+    box-shadow: 0 0 15px rgba(20,241,149,0.15);
+  }
+  .btn-start:hover {
+    background: rgba(20,241,149,0.2);
+    box-shadow: 0 0 25px rgba(20,241,149,0.3);
+  }
+  .btn-stop {
+    background: linear-gradient(135deg, rgba(255,68,102,0.15), rgba(255,68,102,0.05));
+    color: #ff4466;
+    border: 1px solid #ff4466;
+    text-shadow: 0 0 8px rgba(255,68,102,0.6);
+    box-shadow: 0 0 15px rgba(255,68,102,0.1);
+  }
+  .btn-stop:hover { background: rgba(255,68,102,0.2); }
+  .btn-save {
+    background: linear-gradient(135deg, rgba(153,69,255,0.2), rgba(153,69,255,0.05));
+    color: var(--sol-purple);
+    border: 1px solid var(--sol-purple);
+    text-shadow: 0 0 8px rgba(153,69,255,0.6);
+    box-shadow: 0 0 15px rgba(153,69,255,0.15);
+    margin-bottom: 0;
+  }
+  .btn-save:hover { background: rgba(153,69,255,0.25); box-shadow: 0 0 25px rgba(153,69,255,0.3); }
+  .btn-cancel {
+    width: 100%;
+    margin-top: 8px;
+    background: rgba(255,68,102,0.05);
+    color: #ff4466;
+    border: 1px solid rgba(255,68,102,0.4);
+    opacity: 0.7;
+  }
+  .btn-cancel:hover { opacity: 1; }
+
+  /* INPUTS */
+  label {
+    display: block;
+    font-size: 0.68rem;
+    color: var(--dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+    font-family: 'Share Tech Mono', monospace;
+  }
+  input {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--sol-blue);
+    padding: 8px 12px;
+    font-size: 0.88rem;
+    margin-bottom: 12px;
+    font-family: 'Share Tech Mono', monospace;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  input:focus {
+    border-color: var(--sol-purple);
+    box-shadow: 0 0 12px rgba(153,69,255,0.25);
+  }
+
+  /* FILLS TABLE */
+  .fills-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; margin-top: 8px; }
+  .fills-table th {
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--dim);
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    letter-spacing: 1px;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+  }
+  .fills-table td {
+    padding: 7px 8px;
+    border-bottom: 1px solid rgba(153,69,255,0.06);
+    font-family: 'Share Tech Mono', monospace;
+  }
+  .buy  { color: var(--sol-green); text-shadow: 0 0 6px rgba(20,241,149,0.4); }
+  .sell { color: #ff4466; text-shadow: 0 0 6px rgba(255,68,102,0.4); }
+
+  /* WARNING */
+  .warning {
+    background: rgba(255,180,0,0.05);
+    border: 1px solid rgba(255,180,0,0.4);
+    border-left: 3px solid #ffb400;
+    padding: 10px 16px;
+    font-size: 0.78rem;
+    color: #ffb400;
+    margin-bottom: 18px;
+    font-family: 'Share Tech Mono', monospace;
+    letter-spacing: 1px;
+  }
+
+  /* PULSE animation for running state */
+  @keyframes pulse-green {
+    0%, 100% { box-shadow: 0 0 12px rgba(20,241,149,0.2); }
+    50%       { box-shadow: 0 0 24px rgba(20,241,149,0.45); }
+  }
+  .badge-on { animation: pulse-green 2s ease-in-out infinite; }
+
+  /* ticker animation */
+  @keyframes ticker {
+    0%   { opacity: 0.6; }
+    50%  { opacity: 1; }
+    100% { opacity: 0.6; }
+  }
+  #st-price { animation: ticker 3s ease-in-out infinite; }
 </style>
 </head>
 <body>
-<div style="max-width:1000px;margin:0 auto;">
-  <h1>⚡ Grid Bot — Pacifica.fi</h1>
-  <h2>Futures Grid Trading · <span class="badge-strategy">Long-only · Bullish Trend</span></h2>
+<div class="wrap">
 
-  <div id="warning" class="warning" style="display:none">
-    ⚠️ El precio actual está fuera del rango configurado. Ajusta los límites.
+  <div class="header">
+    <div class="header-title">⚡ GRID_BOT <span>//</span> PACIFICA.fi</div>
+    <div class="header-sub">
+      Futures Grid Trading
+      <span class="header-tag">LONG-ONLY · BULLISH</span>
+      <span class="header-tag">SOL-CHAIN</span>
+    </div>
   </div>
 
-  <div class="grid">
+  <div id="warning" class="warning" style="display:none">
+    !! PRECIO FUERA DE RANGO — AJUSTA LOS LIMITES DEL GRID
+  </div>
+
+  <div class="panels">
 
     <!-- STATUS -->
     <div class="card">
-      <h3>📊 Estado del Bot</h3>
+      <div class="card-title">system_status</div>
       <div class="stat">
-        <span class="stat-label">Estado</span>
-        <span id="st-status" class="badge badge-off">DETENIDO</span>
+        <span class="stat-label">estado</span>
+        <span id="st-status" class="badge badge-off">OFFLINE</span>
       </div>
       <div class="stat">
-        <span class="stat-label">Precio BTC</span>
+        <span class="stat-label">btc_price</span>
         <span id="st-price" class="stat-value">—</span>
       </div>
       <div class="stat">
-        <span class="stat-label">Precio en rango</span>
+        <span class="stat-label">en_rango</span>
         <span id="st-inrange" class="stat-value">—</span>
       </div>
       <div class="stat">
-        <span class="stat-label">Órdenes activas</span>
+        <span class="stat-label">ordenes_activas</span>
         <span id="st-orders" class="stat-value">—</span>
       </div>
       <div class="stat">
-        <span class="stat-label">Trades hoy</span>
+        <span class="stat-label">trades_24h</span>
         <span id="st-trades" class="stat-value">0</span>
       </div>
       <div class="stat">
-        <span class="stat-label">Volumen hoy</span>
+        <span class="stat-label">volumen_24h</span>
         <span id="st-volume" class="stat-value">$0</span>
       </div>
       <div class="stat">
-        <span class="stat-label">Profit estimado</span>
-        <span id="st-profit" class="stat-value">$0</span>
+        <span class="stat-label">profit_est</span>
+        <span id="st-profit" class="stat-value">$0.0000</span>
       </div>
       <div class="stat">
-        <span class="stat-label">Último fill</span>
-        <span id="st-lastfill" class="stat-value" style="font-size:0.82rem">—</span>
+        <span class="stat-label">ultimo_fill</span>
+        <span id="st-lastfill" class="stat-value" style="font-size:0.75rem">—</span>
       </div>
       <div class="stat">
-        <span class="stat-label">Iniciado</span>
-        <span id="st-started" class="stat-value" style="font-size:0.82rem">—</span>
+        <span class="stat-label">uptime_desde</span>
+        <span id="st-started" class="stat-value" style="font-size:0.75rem">—</span>
       </div>
 
       <div class="grid-info">
-        <div class="grid-info-item">
-          <div id="gi-spacing" class="val">—</div>
-          <div class="lbl">Spacing $</div>
-        </div>
-        <div class="grid-info-item">
-          <div id="gi-perGrid" class="val">—</div>
-          <div class="lbl">$ por grid</div>
-        </div>
-        <div class="grid-info-item">
-          <div id="gi-volTrade" class="val">—</div>
-          <div class="lbl">Vol/trade</div>
-        </div>
+        <div class="gi"><div id="gi-spacing" class="val">—</div><div class="lbl">spacing</div></div>
+        <div class="gi"><div id="gi-perGrid" class="val">—</div><div class="lbl">$/grid</div></div>
+        <div class="gi"><div id="gi-volTrade" class="val">—</div><div class="lbl">vol/trade</div></div>
       </div>
 
       <div class="strategy-box">
-        📈 <b>Long-only:</b> BUY bajo precio actual → cuando llena, SELL take-profit arriba.<br>
-        Sin posiciones cortas. Gana en cada rebote del grid.
+        &gt; <b>LONG_ONLY:</b> BUY bajo precio → fill → SELL_TP arriba<br>
+        &gt; Sin cortos. Cicla en cada rebote del grid.
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">
+      <div class="btn-row">
         <button class="btn btn-start" onclick="startBot()">▶ INICIAR</button>
         <button class="btn btn-stop"  onclick="stopBot()">■ DETENER</button>
       </div>
-      <button class="btn btn-cancel" onclick="cancelOrders()">🗑 Cancelar todas las órdenes</button>
+      <button class="btn btn-cancel" onclick="cancelOrders()">⊗ CANCELAR TODAS LAS ORDENES</button>
     </div>
 
     <!-- CONFIG -->
     <div class="card">
-      <h3>⚙️ Configuración del Grid</h3>
-      <label>Precio mínimo del rango (USDC)</label>
+      <div class="card-title">grid_config</div>
+      <label>precio_minimo [ usdc ]</label>
       <input id="grid_lower" type="number" placeholder="50000">
-      <label>Precio máximo del rango (USDC)</label>
+      <label>precio_maximo [ usdc ]</label>
       <input id="grid_upper" type="number" placeholder="80000">
-      <label>Número de grids</label>
+      <label>num_grids</label>
       <input id="grid_count" type="number" placeholder="20" min="5" max="200">
-      <label>Capital total (USDC)</label>
+      <label>capital_total [ usdc ]</label>
       <input id="capital_usdc" type="number" placeholder="100">
-      <label>Apalancamiento (x)</label>
+      <label>apalancamiento [ x ]</label>
       <input id="leverage" type="number" placeholder="5" min="1" max="20">
-      <button class="btn btn-save" onclick="saveConfig()">💾 Guardar cambios</button>
+      <button class="btn btn-save" onclick="saveConfig()">// GUARDAR CONFIG</button>
     </div>
 
     <!-- API KEYS -->
     <div class="card">
-      <h3>🔑 API Keys — Pacifica</h3>
-      <label>API Key (público)</label>
-      <input id="pacifica_api_key" type="text" placeholder="Tu API Key de Pacifica">
-      <label>API Secret (privado)</label>
-      <input id="pacifica_api_secret" type="password" placeholder="Tu API Secret">
-      <label>Wallet Solana (pública)</label>
-      <input id="pacifica_wallet" type="text" placeholder="Tu dirección Solana">
-      <button class="btn btn-save" onclick="saveConfig()">💾 Guardar credenciales</button>
+      <div class="card-title">api_credentials</div>
+      <label>agent_wallet [ public ]</label>
+      <input id="pacifica_api_key" type="text" placeholder="API Key de Pacifica">
+      <label>private_key [ secret ]</label>
+      <input id="pacifica_api_secret" type="password" placeholder="API Secret">
+      <label>wallet_solana [ pubkey ]</label>
+      <input id="pacifica_wallet" type="text" placeholder="Dirección Solana">
+      <button class="btn btn-save" onclick="saveConfig()">// GUARDAR CREDENCIALES</button>
     </div>
 
-    <!-- HISTORIAL FILLS -->
+    <!-- FILLS -->
     <div class="card">
-      <h3>📋 Últimos Fills</h3>
+      <div class="card-title">fill_history</div>
       <table class="fills-table">
         <thead>
-          <tr><th>Lado</th><th>Precio</th><th>Volumen</th><th>Hora</th></tr>
+          <tr><th>lado</th><th>precio</th><th>vol_usd</th><th>hora</th></tr>
         </thead>
         <tbody id="fills-body">
-          <tr><td colspan="4" style="color:#8b949e;text-align:center;padding:16px">Sin fills aún</td></tr>
+          <tr><td colspan="4" style="color:#4a5568;text-align:center;padding:20px;font-family:'Share Tech Mono',monospace;letter-spacing:2px">-- NO_FILLS --</td></tr>
         </tbody>
       </table>
     </div>
@@ -589,41 +852,44 @@ function saveConfig() {
   };
   fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg)})
     .then(r => r.json()).then(res => {
-      alert(res.ok ? '✅ Configuración guardada' : '❌ Error: ' + res.error);
+      alert(res.ok ? '// CONFIG_SAVED' : '!! ERROR: ' + res.error);
       updateGridInfo(cfg);
     });
 }
 
 function startBot() {
   fetch('/api/start', {method:'POST'}).then(r => r.json())
-    .then(res => { if (!res.ok) alert('❌ ' + res.error); });
+    .then(res => { if (!res.ok) alert('!! ' + res.error); });
 }
 
 function stopBot() {
   fetch('/api/stop', {method:'POST'}).then(r => r.json())
-    .then(res => { if (!res.ok) alert('❌ ' + res.error); });
+    .then(res => { if (!res.ok) alert('!! ' + res.error); });
 }
 
 function cancelOrders() {
-  if (!confirm('¿Cancelar TODAS las órdenes abiertas en Pacifica?')) return;
+  if (!confirm('CANCELAR TODAS LAS ORDENES ABIERTAS EN PACIFICA?')) return;
   fetch('/api/cancel', {method:'POST'}).then(r => r.json())
-    .then(res => { alert(res.ok ? '✅ Órdenes canceladas' : '❌ Error: ' + (res.error || 'desconocido')); });
+    .then(res => { alert(res.ok ? '// ORDERS_CANCELLED' : '!! ERROR: ' + (res.error || 'unknown')); });
 }
 
 function updateStatus() {
   fetch('/api/status').then(r => r.json()).then(s => {
     const running = s.running;
-    document.getElementById('st-status').textContent  = running ? 'EN EJECUCIÓN' : 'DETENIDO';
-    document.getElementById('st-status').className    = 'badge ' + (running ? 'badge-on' : 'badge-off');
-    document.getElementById('st-price').textContent   = s.status.current_price ? '$' + s.status.current_price.toLocaleString('es-CL', {minimumFractionDigits:1}) : '—';
-    document.getElementById('st-inrange').textContent = s.status.price_in_range ? '✅ Sí' : '⚠️ No';
+    document.getElementById('st-status').textContent = running ? 'ONLINE' : 'OFFLINE';
+    document.getElementById('st-status').className   = 'badge ' + (running ? 'badge-on' : 'badge-off');
+    document.getElementById('st-price').textContent  = s.status.current_price
+      ? '$' + s.status.current_price.toLocaleString('es-CL', {minimumFractionDigits:1}) : '—';
+    document.getElementById('st-inrange').textContent = s.status.price_in_range ? '[ OK ]' : '[ OUT ]';
+    document.getElementById('st-inrange').style.color = s.status.price_in_range ? 'var(--sol-green)' : '#ffb400';
     document.getElementById('st-orders').textContent  = s.status.active_orders;
     document.getElementById('st-trades').textContent  = s.status.trades_today;
     document.getElementById('st-volume').textContent  = '$' + s.status.volume_today.toLocaleString('es-CL', {minimumFractionDigits:0});
     document.getElementById('st-profit').textContent  = '$' + s.status.profit_usdc.toFixed(4);
     document.getElementById('st-lastfill').textContent = s.status.last_fill;
     document.getElementById('st-started').textContent  = s.status.started_at;
-    document.getElementById('warning').style.display = (!running && s.status.current_price && !s.status.price_in_range) ? 'block' : 'none';
+    document.getElementById('warning').style.display  =
+      (!running && s.status.current_price && !s.status.price_in_range) ? 'block' : 'none';
 
     const tbody = document.getElementById('fills-body');
     if (s.status.fills && s.status.fills.length > 0) {
