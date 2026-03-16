@@ -982,6 +982,12 @@ def api_status():
         "status":  bot_state["status"],
     })
 
+@app.route("/api/debug/history")
+def api_debug_history():
+    """Muestra los últimos 5 órdenes del historial con todos sus campos — para debug."""
+    orders = get_order_history()
+    return jsonify({"count": len(orders), "orders": orders[:5]})
+
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 5000))
